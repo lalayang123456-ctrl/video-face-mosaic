@@ -82,13 +82,18 @@ def _frame_step(vs) -> int:
     return max(1, round(1 / (Fraction(rate) * vs.time_base)))
 
 
+def codec_family(cc) -> str:
+    """Canonical codec name of a codec context, e.g. "av1" for the libdav1d decoder (cc.name would be "libdav1d")."""
+    return getattr(cc.codec, "canonical_name", None) or cc.name
+
+
 def probe(path) -> dict:
     with av.open(str(path)) as c:
         vs = pick_video_stream(c)
         cc = vs.codec_context
         rate = vs.average_rate or vs.guessed_rate
         return {
-            "codec": cc.name,
+            "codec": codec_family(cc),
             "width": cc.width,
             "height": cc.height,
             "pix_fmt": cc.format.name if cc.format else None,
@@ -153,15 +158,18 @@ def encoder_options(name: str, ecfg: dict) -> dict:
     q = str(ecfg["quality"])
     preset = ecfg.get("preset")
     if name.endswith("_nvenc"):
-        return {"preset": str(preset or "p5"), "tune": "hq", "rc": "vbr", "cq": q}
-    if name in ("libx264", "libx265"):
+        opts = {"preset": str(preset or "p5"), "tune": "hq", "rc": "vbr", "cq": q}
+    elif name in ("libx264", "libx265"):
         opts = {"crf": q, "preset": str(preset or "medium")}
         if name == "libx265":
             opts["x265-params"] = "log-level=error"
-        return opts
-    if name == "libsvtav1":
-        return {"crf": q, "preset": str(preset if preset is not None else 8)}
-    return {}
+    elif name == "libsvtav1":
+        opts = {"crf": q, "preset": str(preset if preset is not None else 8)}
+    else:
+        opts = {}
+    # Raw encoder options, e.g. {"x264-params": "me=hex:b-adapt=1"}; applied last
+    opts.update({str(k): str(v) for k, v in (ecfg.get("extra_options") or {}).items()})
+    return opts
 
 
 def _configure(cc, width, height, pix, rate, time_base, ecfg):
@@ -242,7 +250,7 @@ def render(src, dst, boxes_per_frame, frame_pts, mcfg: dict, ecfg: dict, hwaccel
         rate = vs.average_rate or vs.guessed_rate or Fraction(30)
         a_in = inp.streams.audio[0] if (ecfg.get("keep_audio") and inp.streams.audio) else None
         src_pix = src_pix_fmt or (cc.format.name if cc.format and cc.format.name not in HW_PIX_FMTS else "yuv420p")
-        name, pix, opts = choose_encoder(cc.name, src_pix, cc.width, cc.height, rate, vs.time_base, ecfg)
+        name, pix, opts = choose_encoder(codec_family(cc), src_pix, cc.width, cc.height, rate, vs.time_base, ecfg)
         info.update(encoder=name, pix_fmt=pix, options=opts)
         dropped = [f"{s.index}:{s.type}" for s in inp.streams if s.index != vs.index and (a_in is None or s.index != a_in.index)]
         if dropped:
@@ -301,6 +309,58 @@ def render(src, dst, boxes_per_frame, frame_pts, mcfg: dict, ecfg: dict, hwaccel
     os.replace(tmp, dst)
     info["frames_written"] = n
     return info
+
+
+def stream_params(path) -> dict:
+    """Encoding parameters of the main video stream, read from packets only (no decoding)."""
+    with av.open(str(path)) as c:
+        vs = pick_video_stream(c)
+        cc = vs.codec_context
+        pk = [(p.pts, p.is_keyframe, p.size) for p in c.demux(vs) if p.pts is not None]
+        tb = vs.time_base
+        params = {
+            "codec": codec_family(cc),
+            "profile": cc.profile,
+            "width": cc.width,
+            "height": cc.height,
+            "pix_fmt": cc.format.name if cc.format else None,
+            "time_base": str(tb),
+            "rate": str(vs.average_rate),
+            "b_frames": bool(cc.has_b_frames),
+            "color": [int(getattr(cc, k) or 0) for k in ("color_range", "colorspace", "color_primaries", "color_trc")],
+        }
+    pts = sorted(p[0] for p in pk)
+    keys = [i for i, p in enumerate(pk) if p[1]]
+    step = float(np.median(np.diff(pts))) if len(pts) > 1 else 1.0
+    dur = float((pts[-1] - pts[0] + step) * tb) if pts else 0.0
+    params.update(
+        frames=len(pts),
+        times=[float(p * tb) for p in pts],
+        keyint=int(np.median(np.diff(keys))) if len(keys) > 1 else None,
+        kbps=round(sum(p[2] for p in pk) * 8 / dur / 1000, 1) if dur else None,
+    )
+    return params
+
+
+def compare_params(src: dict, dst: dict, bitrate_range=(0.5, 2.0)) -> list[str]:
+    """Differences between two stream_params() results that matter for a drop-in replacement. Empty = consistent."""
+    diffs = []
+    for k in ("codec", "profile", "width", "height", "pix_fmt", "rate", "frames", "b_frames", "color"):
+        if src[k] != dst[k]:
+            diffs.append(f"{k}: {src[k]} -> {dst[k]}")
+    tol = max(float(Fraction(src["time_base"])), float(Fraction(dst["time_base"])))
+    bad = sum(1 for a, b in zip(src["times"], dst["times"]) if abs(a - b) > tol)
+    if bad:
+        diffs.append(f"timestamps: {bad} frame(s) differ")
+    # Short fixed GOPs (e.g. LeRobot's keyint 2) must match exactly; long GOPs only need to stay long
+    sk, dk = src["keyint"], dst["keyint"]
+    if (sk is not None and sk <= 8 and dk != sk) or (sk is not None and sk > 8 and (dk or 0) <= 8):
+        diffs.append(f"keyint: {sk} -> {dk}")
+    if src["kbps"] and dst["kbps"]:
+        r = dst["kbps"] / src["kbps"]
+        if not bitrate_range[0] <= r <= bitrate_range[1]:
+            diffs.append(f"bitrate: {src['kbps']} -> {dst['kbps']} kbps (x{r:.2f})")
+    return diffs
 
 
 def verify(dst, expected_pts, in_time_base: str, width: int, height: int) -> dict:

@@ -42,7 +42,8 @@ encode:
   preset: null                # null = encoder default (NVENC p5, x264/x265 medium, SVT-AV1 8)
   gop: null                   # keyframe interval, null = encoder default. LeRobot datasets typically use 2
   max_b_frames: null
-  copy_if_no_face: true       # copy the source file unchanged when nothing needs to be masked
+  extra_options: {}           # raw encoder options passed through, e.g. {x264-params: "me=hex:b-adapt=1"}
+  copy_if_no_face: true      # copy the source file unchanged when nothing needs to be masked
   keep_audio: true
 
 decode:

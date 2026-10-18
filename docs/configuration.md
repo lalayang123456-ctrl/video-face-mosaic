@@ -70,6 +70,7 @@ Per-frame detection has misses (a face not detected in a few frames) and false p
 | `preset` | `null` | Encoder preset. When null: NVENC `p5`, x264 / x265 `medium`, SVT-AV1 `8` |
 | `gop` | `null` | Keyframe interval; null = encoder default. Some data loaders require a fixed value (LeRobot typically uses 2) |
 | `max_b_frames` | `null` | Maximum number of B-frames; null = encoder default |
+| `extra_options` | `{}` | Raw encoder options passed straight through, applied last. Useful to reproduce how the originals were encoded, e.g. `{x264-params: "me=hex:b-adapt=1"}` |
 | `copy_if_no_face` | `true` | Copy the source file unchanged when no frame needs masking |
 | `keep_audio` | `true` | Copy the first audio track as-is (no re-encoding) |
 

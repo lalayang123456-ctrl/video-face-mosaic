@@ -75,7 +75,9 @@ def detect_video(src: Path, det: FaceDetector, meta: dict, dec: dict, max_frames
     }
 
 
-def process_video(src: Path, dst: Path, work_prefix: Path, cfg: dict, pool: DetectorPool, *, preview: bool = False, force: bool = False) -> dict:
+def process_video(src: Path, dst: Path, work_prefix: Path, cfg: dict, pool: DetectorPool, *, preview: bool = False, force: bool = False,
+                  write_unchanged: bool = True) -> dict:
+    """write_unchanged=False: when nothing needs masking, write no output at all (action "unchanged")."""
     t_start = time.perf_counter()
     meta = probe(src)
     res: dict = {"src": str(src), "dst": str(dst), "meta": meta}
@@ -103,9 +105,12 @@ def process_video(src: Path, dst: Path, work_prefix: Path, cfg: dict, pool: Dete
     # 3) Mosaic + encode, or copy as-is
     ecfg = cfg["encode"]
     if tstats["mosaic_frames"] == 0 and ecfg.get("copy_if_no_face", True):
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        res["action"] = "copied"
+        if write_unchanged:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            res["action"] = "copied"
+        else:
+            res["action"] = "unchanged"
         res["status"] = "ok"
     else:
         t0 = time.perf_counter()

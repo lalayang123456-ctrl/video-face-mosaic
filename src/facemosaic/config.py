@@ -56,6 +56,7 @@ DEFAULTS: dict = {
         "preset": None,  # None = encoder-specific default
         "gop": None,  # keyframe interval; None = encoder default
         "max_b_frames": None,
+        "extra_options": {},  # raw encoder options passed through, e.g. {"x264-params": "me=hex"}
         "copy_if_no_face": True,  # copy the source file as-is when nothing needs to be masked
         "keep_audio": True,
     },

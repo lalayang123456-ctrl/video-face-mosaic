@@ -76,6 +76,41 @@ def test_render_keeps_frames_timestamps_and_audio(tmp_path):
     assert not (dst.parent / "in.partial.mp4").exists()
 
 
+def test_av1_source_stays_av1(tmp_path):
+    """The AV1 decoder is called libdav1d; the output must still be AV1, not the fallback codec."""
+    src, dst = tmp_path / "av1.mp4", tmp_path / "out.mp4"
+    with av.open(str(src), "w") as c:
+        s = c.add_stream("libsvtav1", rate=30, options={"crf": "40", "preset": "12"})
+        s.width, s.height, s.pix_fmt = 128, 96, "yuv420p"
+        for i in range(10):
+            f = av.VideoFrame.from_ndarray(np.full((96, 128, 3), i * 20, np.uint8), format="rgb24")
+            f.pts = i
+            for p in s.encode(f):
+                c.mux(p)
+        for p in s.encode(None):
+            c.mux(p)
+    assert probe(src)["codec"] == "av1"
+    pts = _decoded_pts(src)
+    info = render(src, dst, [[[8, 8, 64, 64]]] * len(pts), pts, DEFAULTS["mosaic"], SW_ENCODE)
+    assert info["encoder"] == "libsvtav1"
+    assert probe(dst)["codec"] == "av1"
+
+
+def test_compare_params_accepts_drop_in_replacement_and_flags_codec_change(tmp_path):
+    from facemosaic.video import compare_params, stream_params
+
+    src, same, other = tmp_path / "in.mp4", tmp_path / "same.mp4", tmp_path / "other.mp4"
+    _make_video(src)
+    pts = _decoded_pts(src)
+    boxes = [[[20, 20, 80, 80]]] * len(pts)
+    render(src, same, boxes, pts, DEFAULTS["mosaic"], {**SW_ENCODE, "quality": 23})
+    render(src, other, boxes, pts, DEFAULTS["mosaic"], {**SW_ENCODE, "codec": "hevc"})
+    s = stream_params(src)
+    diffs = [d for d in compare_params(s, stream_params(same)) if not d.startswith("bitrate")]
+    assert diffs == []
+    assert any(d.startswith("codec") for d in compare_params(s, stream_params(other)))
+
+
 def test_mosaic_does_not_leak_into_later_frames_via_reference(tmp_path):
     """Decoded frames share buffers with the decoder's reference frames: they must be copied before
     pixelating, otherwise the mosaic leaks into later frames."""
