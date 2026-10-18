@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Model files (fetched with `facemosaic download-models`, never committed)
+models/*.onnx
+models/*.download
+models/*.tmp
+
+# Processing output and intermediate results
+output*/
+compare_output/
+_work/
+*.partial.*
+
+# Video files (avoid committing raw footage that contains faces)
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.mkv
+*.avi
+*.webm
+*.m4v
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,80 @@
+# facemosaic default configuration
+#
+# Merge order: built-in defaults <- this file <- matched profiles (see the end of this file).
+# Anything not set here falls back to the built-in default. Every parameter is documented in
+# docs/configuration.md.
+# To customize: copy this file, edit it, and pass it with `facemosaic run ... -c your_config.yaml`.
+
+detector:
+  name: scrfd                 # scrfd (GPU, recommended) | yunet (CPU, lightweight, more false positives; for comparison only)
+  model: models/det_10g.onnx  # relative paths are looked up in the current directory, then in the repo root
+  device: cuda                # cuda | cpu (use cpu without an NVIDIA GPU; much slower)
+  fp16: true                  # use an FP16 model on GPU (auto-converted on first run): same detections, faster
+  # Multi-scale detection. size = long side of the detection image in pixels
+  # (0 = native resolution; never upscales; scales that end up the same size are de-duplicated).
+  # border_pad = padding ratio added on every side; helps with faces cut off by the frame edge.
+  scales:
+    - {size: 1280, border_pad: 0.0}    # small, distant faces
+    - {size: 640,  border_pad: 0.15}   # medium / large faces
+    - {size: 320,  border_pad: 0.15}   # huge faces right in front of the lens
+  score_low: 0.2              # raw detections below this score are dropped
+  nms_iou: 0.4
+  min_face: 0                 # minimum face side in source pixels; 0 = no limit
+
+tracking:
+  score_high: 0.5             # a track counts as a face only if at least one frame reaches this score (filters object false positives)
+  iou_match: 0.2              # IoU needed to link boxes in neighbouring frames
+  match_expand: 0.5           # enlarge boxes by this ratio before linking (tolerates fast motion)
+  max_gap: 15                 # gaps of up to this many missed frames are interpolated (~0.5 s at 30 fps)
+  extend: 5                   # extra frames masked before the start and after the end of each track
+  expand: 0.25                # mosaic box is this much larger than the face box (covers hair and ears)
+  min_track_len: 1
+
+mosaic:
+  blocks: 10                  # mosaic cells across the box width (fewer = coarser)
+  min_block: 4                # minimum cell size in pixels
+
+encode:
+  codec: auto                 # auto = same as source (h264 / hevc / av1); or force h264 / hevc / av1
+  fallback_codec: h264        # used when the source codec is none of the above
+  hw: true                    # prefer NVENC; falls back to libx264 / libx265 / libsvtav1 automatically
+  quality: 19                 # NVENC cq / software crf; lower = better quality, larger files
+  preset: null                # null = encoder default (NVENC p5, x264/x265 medium, SVT-AV1 8)
+  gop: null                   # keyframe interval, null = encoder default. LeRobot datasets typically use 2
+  max_b_frames: null
+  copy_if_no_face: true       # copy the source file unchanged when nothing needs to be masked
+  keep_audio: true
+
+decode:
+  hwaccel: cuda               # NVDEC hardware decoding; null = software. Unsupported codecs fall back to software
+  scale_threads: 4            # threads used to downscale frames for detection
+
+preview:
+  width: 960                  # width of the --preview videos
+
+# ---------------------------------------------------------------------------
+# profiles: matched against each video's path relative to the input directory
+# (case-insensitive, fnmatch wildcards). A matching profile overrides the settings above.
+# The whole relative path is matched, so the camera name can be in a directory or a file name, e.g.
+#   episode_0001/wrist.mp4
+#   videos/chunk-000/observation.images.wrist/episode_000000.mp4   (LeRobot layout)
+# If several profiles match, they are applied in the order written.
+# Note: list values (such as scales) replace the default list entirely; they are not merged item by item.
+# Adjust `match` to your dataset's camera names.
+profiles:
+  wrist:
+    match: ["*wrist*"]
+    detector:
+      scales:                 # wrist camera: many close-up faces, often cut off by the frame edge -> more padding
+        - {size: 1280, border_pad: 0.1}
+        - {size: 640,  border_pad: 0.25}
+        - {size: 320,  border_pad: 0.25}
+  head:
+    match: ["*head*"]         # head camera: default settings
+  third:
+    match: ["*third*"]
+    detector:
+      scales:                 # third-person camera: many small, distant faces -> largest scale at native resolution
+        - {size: 0,   border_pad: 0.0}
+        - {size: 640, border_pad: 0.15}
+        - {size: 320, border_pad: 0.15}

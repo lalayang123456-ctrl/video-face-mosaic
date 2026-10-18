@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "video-face-mosaic"
+version = "0.1.0"
+description = "Batch face mosaicking for multi-camera robot-arm videos: per-frame detection + mosaic, frame count and timestamps preserved"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "av>=18",
+    "pyyaml>=6.0",
+    "tqdm>=4.60",
+]
+
+[project.optional-dependencies]
+# NVIDIA GPU: the CUDA / cuDNN runtime comes from pip, no separate CUDA Toolkit needed
+gpu = [
+    "onnxruntime-gpu[cuda,cudnn]>=1.21",
+    "onnx>=1.15",
+    "onnxconverter-common>=1.14",
+]
+# No NVIDIA GPU
+cpu = ["onnxruntime>=1.21"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+facemosaic = "facemosaic.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
