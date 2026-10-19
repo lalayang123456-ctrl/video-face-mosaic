@@ -29,6 +29,14 @@ tracking:
   extend: 5                   # extra frames masked before the start and after the end of each track
   expand: 0.25                # mosaic box is this much larger than the face box (covers hair and ears)
   min_track_len: 1
+  person_check:               # reject face-like objects (jars, packaging, lids...); needs `download-models --all`
+    enabled: false            # turn on if objects in front of the camera get masked; see docs/configuration.md
+    model: models/yolox_s.onnx
+    conf: 0.4                 # person detection threshold (cluttered scenes give spurious "persons" below ~0.4)
+    frames: 3                 # check each track's N best-scoring frames; one match keeps the track
+    head_frac: 0.5            # the face must sit in the top part of the person box
+    tiny_face: 22             # faces up to this size (px) are kept without a check (distant people)
+    trust_score: 0.85         # tracks scoring at least this are kept without a check
 
 mosaic:
   blocks: 10                  # mosaic cells across the box width (fewer = coarser)

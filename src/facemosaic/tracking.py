@@ -60,15 +60,28 @@ def link_tracks(dets_per_frame, iou_thr: float, max_gap: int, match_expand: floa
     return tracks
 
 
-def finalize(dets_per_frame, n_frames: int, width: int, height: int, tcfg: dict) -> tuple[list, dict]:
-    """Returns (per-frame mosaic boxes [[x1, y1, x2, y2], ...] in integer pixels, stats)."""
+def is_confirmed(tr: dict, tcfg: dict) -> bool:
+    """A track is a face if it is long enough and at least one of its frames reaches score_high."""
+    return len(tr["frames"]) >= tcfg["min_track_len"] and max(tr["scores"]) >= tcfg["score_high"]
+
+
+def finalize(dets_per_frame, n_frames: int, width: int, height: int, tcfg: dict, track_filter=None) -> tuple[list, dict]:
+    """Returns (per-frame mosaic boxes [[x1, y1, x2, y2], ...] in integer pixels, stats).
+
+    track_filter: optional callable(list of confirmed tracks) -> list of bools; tracks mapped to False are dropped
+    (used by the person check to reject face-like objects).
+    """
     tracks = link_tracks(dets_per_frame, tcfg["iou_match"], tcfg["max_gap"], tcfg["match_expand"])
+    confirmed = [tr for tr in tracks if is_confirmed(tr, tcfg)]
+    n_rejected = 0
+    if track_filter is not None and confirmed:
+        keep = track_filter(confirmed)
+        n_rejected = sum(1 for k in keep if not k)
+        confirmed = [tr for tr, k in zip(confirmed, keep) if k]
     out: list[list] = [[] for _ in range(n_frames)]
     extend = int(tcfg["extend"])
     n_conf = n_filled = 0
-    for tr in tracks:
-        if max(tr["scores"]) < tcfg["score_high"] or len(tr["frames"]) < tcfg["min_track_len"]:
-            continue
+    for tr in confirmed:
         n_conf += 1
         fr = np.asarray(tr["frames"])
         bx = np.asarray(tr["boxes"], np.float32)
@@ -91,6 +104,7 @@ def finalize(dets_per_frame, n_frames: int, width: int, height: int, tcfg: dict)
         "raw_det_frames": sum(1 for d in dets_per_frame if d is not None and len(d)),
         "tracks": len(tracks),
         "tracks_confirmed": n_conf,
+        "tracks_rejected": n_rejected,
         "mosaic_frames": sum(1 for b in out if b),
         "filled_boxes": n_filled,
     }

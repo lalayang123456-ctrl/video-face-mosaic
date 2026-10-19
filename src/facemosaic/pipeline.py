@@ -10,13 +10,14 @@ import time
 import traceback
 from pathlib import Path
 
+import numpy as np
 from tqdm import tqdm
 
 from .config import deep_merge, resolve_for, resolve_path, section_hash
-from .detectors import FaceDetector, build_detector
+from .detectors import FaceDetector, PersonDetector, build_detector, face_in_person
 from .models import model_relpath
 from .tracking import finalize
-from .video import VIDEO_EXTS, background, iter_frames, probe, render, render_preview, verify
+from .video import VIDEO_EXTS, background, iter_frames, iter_selected_frames, probe, render, render_preview, verify
 
 
 def _dump_gz(path: Path, obj) -> None:
@@ -41,6 +42,39 @@ class DetectorPool:
         if key not in self._cache:
             self._cache[key] = build_detector(det_cfg)
         return FaceDetector(det_cfg, self._cache[key])
+
+    def person(self, pc: dict, device: str = "cuda") -> PersonDetector:
+        model = resolve_path(pc["model"])
+        key = ("person", str(model), device)
+        if key not in self._cache:
+            if not model.exists():
+                raise FileNotFoundError(f"Person model not found: {model}\nRun: facemosaic download-models --all")
+            self._cache[key] = PersonDetector(model, device)
+        return self._cache[key]
+
+
+def person_check(src: Path, tracks: list[dict], pc: dict, det: PersonDetector, hwaccel: str | None) -> list[bool]:
+    """Keep a confirmed face track if it is tiny, scores very high, or sits in the head region of a detected
+    person in one of its best-scoring frames. Rejects face-like objects (jars, packaging, lids, ...)."""
+    keep: list[bool | None] = [None] * len(tracks)
+    need: dict[int, list] = {}
+    for i, t in enumerate(tracks):
+        best = int(np.argmax(t["scores"]))
+        b = t["boxes"][best]
+        if max(b[2] - b[0], b[3] - b[1]) <= pc["tiny_face"] or t["scores"][best] >= pc["trust_score"]:
+            keep[i] = True
+            continue
+        for j in np.argsort(t["scores"])[::-1][: int(pc["frames"])]:
+            need.setdefault(int(t["frames"][j]), []).append((i, t["boxes"][j]))
+    for idx, img in iter_selected_frames(src, need, hwaccel):
+        pending = [(i, box) for i, box in need[idx] if not keep[i]]
+        if not pending:
+            continue
+        persons = det.detect(img, pc["conf"])
+        for i, box in pending:
+            if face_in_person(box, persons, pc["head_frac"]):
+                keep[i] = True
+    return [bool(k) for k in keep]
 
 
 def _prepared_frames(src, det: FaceDetector, plan, max_frames, dec: dict):
@@ -96,9 +130,14 @@ def process_video(src: Path, dst: Path, work_prefix: Path, cfg: dict, pool: Dete
         _dump_gz(dets_path, data)
     res["detect"] = {k: data[k] for k in ("scales", "elapsed_s", "fps", "providers") if k in data}
 
-    # 2) Temporal post-processing
+    # 2) Temporal post-processing (+ optional person check against face-like objects)
     n = len(data["pts"])
-    boxes, tstats = finalize(data["dets"], n, meta["width"], meta["height"], cfg["tracking"])
+    track_filter = None
+    pc = cfg["tracking"].get("person_check") or {}
+    if pc.get("enabled"):
+        pdet = pool.person(pc, cfg["detector"].get("device", "cuda"))
+        track_filter = lambda tracks: person_check(src, tracks, pc, pdet, cfg["decode"].get("hwaccel"))  # noqa: E731
+    boxes, tstats = finalize(data["dets"], n, meta["width"], meta["height"], cfg["tracking"], track_filter)
     res["tracking"] = tstats
     _dump_gz(Path(str(work_prefix) + ".boxes.json.gz"), {"pts": data["pts"], "boxes": boxes})
 
@@ -146,7 +185,7 @@ def find_videos(inp: Path, exclude: list[Path]) -> tuple[list[Path], Path]:
 
 
 REPORT_FIELDS = ["file", "status", "action", "profiles", "frames", "raw_det_frames", "mosaic_frames", "tracks_confirmed",
-                 "det_fps", "encoder", "elapsed_s", "warnings", "error"]
+                 "tracks_rejected", "det_fps", "encoder", "elapsed_s", "warnings", "error"]
 
 
 def _report_row(rel: str, res: dict) -> dict:
@@ -160,6 +199,7 @@ def _report_row(rel: str, res: dict) -> dict:
         "raw_det_frames": t.get("raw_det_frames"),
         "mosaic_frames": t.get("mosaic_frames"),
         "tracks_confirmed": t.get("tracks_confirmed"),
+        "tracks_rejected": t.get("tracks_rejected"),
         "det_fps": res.get("detect", {}).get("fps"),
         "encoder": res.get("render", {}).get("encoder"),
         "elapsed_s": res.get("elapsed_s"),

@@ -134,6 +134,22 @@ def iter_frames(path, width: int | None = None, height: int | None = None, max_f
             yield pts, img
 
 
+def iter_selected_frames(path, indices, hwaccel: str | None = None):
+    """Decode the main video stream and yield (index, BGR ndarray) for the requested frame indices only."""
+    want = set(indices)
+    if not want:
+        return
+    last = max(want)
+    with open_input(path, hwaccel) as c:
+        vs = pick_video_stream(c)
+        vs.thread_type = "AUTO"
+        for i, frame in enumerate(c.decode(vs)):
+            if i in want:
+                yield i, frame.to_ndarray(format="bgr24")
+            if i >= last:
+                break
+
+
 # ---------------------------------------------------------------- encoding
 
 

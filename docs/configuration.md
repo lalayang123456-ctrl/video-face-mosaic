@@ -52,6 +52,34 @@ Per-frame detection has misses (a face not detected in a few frames) and false p
 | `expand` | `0.25` | The mosaic box is the face box enlarged by this ratio (width and height each +25%), covering hair and ears and absorbing box jitter |
 | `min_track_len` | `1` | Tracks with fewer detected frames than this are dropped |
 
+### tracking.person_check: rejecting face-like objects
+
+In some scenes the face detector keeps firing on objects: jars with dark lids, printed packaging, cup lids,
+chrome objects, shadows. A confirmed track only reflects how face-like something looks, and on such objects
+scores reach 0.5–0.78, the same range as real distant faces. Score thresholds cannot separate them.
+
+With `person_check.enabled: true`, every confirmed track must also pass one of these tests, otherwise it is dropped:
+
+| Test | Why |
+|---|---|
+| Face box ≤ `tiny_face` px | Distant faces are tiny and their bodies are often not detectable; objects rarely look like faces at that size |
+| Best score ≥ `trust_score` | Very confident detections, e.g. a face filling the frame with no body in view |
+| In one of the track's `frames` best-scoring frames, the face center lies in the top `head_frac` of a person box from the YOLOX-s person detector | A real face belongs to a person; an object on a table does not |
+
+| Parameter | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Turn the check on. Requires `models/yolox_s.onnx` (`facemosaic download-models --all`) |
+| `model` | `models/yolox_s.onnx` | YOLOX-s COCO model (Apache-2.0) |
+| `conf` | `0.4` | Person detection threshold. Cluttered shelves and tables produce spurious low-confidence "persons" (0.25–0.4) that would let objects through |
+| `frames` | `3` | Number of best-scoring frames of a track that are checked; one match keeps the track |
+| `head_frac` | `0.5` | The face center must be within the top fraction of the person box (rejects objects on a table in front of a seated person) |
+| `tiny_face` | `22` | Faces up to this size in source pixels skip the check |
+| `trust_score` | `0.85` | Tracks whose best score reaches this skip the check |
+
+On hand-labeled tracks from robot-arm eval videos (two independent samples), this kept 36/36 real faces and
+removed 70/74 of the object false positives. Only frames needed for the check are decoded, so it adds
+little time. The report's `tracks_rejected` column shows how many tracks were dropped per video.
+
 ## mosaic
 
 | Parameter | Default | Description |

@@ -16,6 +16,12 @@ MODELS: dict[str, dict] = {
         "sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91",
         "license": "InsightFace pretrained weights, non-commercial research use only",
     },
+    "yolox_s": {
+        "file": "yolox_s.onnx",
+        "url": "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_s.onnx",
+        "sha256": "c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063",
+        "license": "Megvii YOLOX, Apache-2.0",
+    },
     "yunet": {
         "file": "face_detection_yunet_2023mar.onnx",
         "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",

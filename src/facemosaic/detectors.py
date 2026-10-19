@@ -156,6 +156,67 @@ class YuNet:
         return np.stack([x, y, x + bw, y + bh, faces[:, 14]], axis=1).astype(np.float32)
 
 
+class PersonDetector:
+    """YOLOX (COCO, ONNX) person detector, used to check that a face track belongs to a person.
+
+    detect() returns float32 (N, 5): x1, y1, x2, y2, score for class "person", in input-image pixels.
+    """
+
+    size = 640
+
+    def __init__(self, model_path: str | Path, device: str = "cuda"):
+        import onnxruntime as ort
+
+        ort.set_default_logger_severity(3)
+        providers = ["CPUExecutionProvider"]
+        if device == "cuda":
+            try:
+                ort.preload_dlls()
+            except Exception:
+                pass
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        so = ort.SessionOptions()
+        so.log_severity_level = 3
+        self.session = ort.InferenceSession(str(model_path), so, providers=providers)
+        self.input_name = self.session.get_inputs()[0].name
+        grids, strides = [], []
+        for s in (8, 16, 32):
+            g = self.size // s
+            yv, xv = np.meshgrid(np.arange(g), np.arange(g), indexing="ij")
+            grids.append(np.stack((xv, yv), 2).reshape(-1, 2))
+            strides.append(np.full((g * g, 1), s))
+        self._grids = np.concatenate(grids).astype(np.float32)
+        self._strides = np.concatenate(strides).astype(np.float32)
+
+    def detect(self, img: np.ndarray, conf: float = 0.25, nms_iou: float = 0.45) -> np.ndarray:
+        h, w = img.shape[:2]
+        r = min(self.size / h, self.size / w)
+        canvas = np.full((self.size, self.size, 3), 114, np.uint8)
+        canvas[: int(h * r), : int(w * r)] = cv2.resize(img, (int(w * r), int(h * r)), interpolation=cv2.INTER_LINEAR)
+        out = self.session.run(None, {self.input_name: canvas.transpose(2, 0, 1)[None].astype(np.float32)})[0][0]
+        score = out[:, 4] * out[:, 5]  # objectness * P(person); class 0 = person
+        keep = score >= conf
+        if not keep.any():
+            return EMPTY
+        xy = (out[keep, :2] + self._grids[keep]) * self._strides[keep]
+        wh = np.exp(out[keep, 2:4]) * self._strides[keep]
+        boxes = np.concatenate([xy - wh / 2, xy + wh / 2], 1) / r
+        k = nms(boxes, score[keep], nms_iou)
+        return np.concatenate([boxes[k], score[keep][k, None]], 1).astype(np.float32)
+
+
+def face_in_person(face, persons: np.ndarray, head_frac: float = 0.5, margin: float = 0.1, max_area: float = 0.8) -> bool:
+    """True if the face box sits in the head region (upper part) of some person box."""
+    fx, fy = (face[0] + face[2]) / 2, (face[1] + face[3]) / 2
+    fa = (face[2] - face[0]) * (face[3] - face[1])
+    for x1, y1, x2, y2, _ in persons:
+        pw, ph = x2 - x1, y2 - y1
+        if (x1 - margin * pw <= fx <= x2 + margin * pw and y1 - margin * ph <= fy <= y1 + head_frac * ph
+                and fa <= max_area * pw * ph):
+            return True
+    return False
+
+
 def ensure_fp16(model: Path) -> Path:
     """Convert the FP32 model to FP16 on first use (inputs/outputs stay FP32) and cache it next to it."""
     out = model.with_name(model.stem + "_fp16.onnx")

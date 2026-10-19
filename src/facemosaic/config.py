@@ -43,6 +43,17 @@ DEFAULTS: dict = {
         "extend": 5,  # frames added before the start and after the end of each track
         "expand": 0.25,  # how much larger the mosaic box is than the face box
         "min_track_len": 1,
+        # Reject face-like objects (jars, packaging, lids, ...): a confirmed track is kept only if it is tiny,
+        # scores very high, or its face box sits in the head region of a person found by a person detector.
+        "person_check": {
+            "enabled": False,
+            "model": "models/yolox_s.onnx",
+            "conf": 0.4,  # person detection threshold; cluttered shelves / tables produce spurious "persons" below ~0.4
+            "frames": 3,  # check the track's N best-scoring frames; any match keeps the track
+            "head_frac": 0.5,  # face center must be in the top part of the person box
+            "tiny_face": 22,  # faces this small (px) are kept without a check: distant people's bodies are often not visible
+            "trust_score": 0.85,  # tracks scoring this high are kept without a check (e.g. a face filling the frame)
+        },
     },
     "mosaic": {
         "blocks": 10,  # number of mosaic cells across the box width

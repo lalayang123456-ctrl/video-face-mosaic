@@ -198,6 +198,7 @@ facemosaic run D:\data\episodes -o D:\data\out -c configs\my_dataset.yaml
 | `tracking.score_high` | 0.5 | Lower it (e.g. 0.4) if faces are missed; raise it (e.g. 0.6) if objects get masked |
 | `tracking.expand` | 0.25 | Raise it if the mosaic does not cover hair or ears |
 | `tracking.max_gap` / `extend` | 15 / 5 | Raise them if a face flickers into view for single frames |
+| `tracking.person_check.enabled` | false | Turn on if objects in view (jars, packaging, lids, shadows) get masked; drops face tracks that do not belong to a person. Needs `facemosaic download-models --all` |
 | `mosaic.blocks` | 10 | Lower it if masked faces are still recognizable |
 | `encode.quality` | 19 | Lower it for better output quality (larger files) |
 | `encode.gop` | encoder default | Set it when your data loader needs a specific keyframe interval (LeRobot typically uses 2) |
@@ -225,6 +226,9 @@ Detection dominates the run time; mosaic plus re-encoding is fast (about 190 fra
 - Automatic masking cannot guarantee that no face is ever missed. Spot-check the previews before publishing data.
 
 ## FAQ
+
+**Objects get masked (jars, food packaging, cup lids, shadows)**
+The face detector sometimes fires on face-like objects, and in robot videos those objects can stay in view for a long time. Run `facemosaic download-models --all` and set `tracking.person_check.enabled: true`: face tracks that do not belong to a detected person are dropped. See [docs/configuration.md](docs/configuration.md#trackingperson_check-rejecting-face-like-objects).
 
 **PowerShell refuses to activate the virtual environment ("running scripts is disabled on this system")**
 Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then activate again. Or skip activation and use the full path: `.venv\Scripts\facemosaic.exe run ...`.
@@ -283,6 +287,7 @@ The tests need neither a GPU nor the model files. They cover gap filling, mosaic
 | Model | Purpose | License |
 |---|---|---|
 | SCRFD-10G (`det_10g.onnx`, InsightFace) | Default detector | Pretrained weights are **for non-commercial research use only**; check licensing before commercial use |
+| YOLOX-s (Megvii) | Optional person detector for `tracking.person_check` | Apache-2.0 |
 | YuNet (OpenCV Zoo) | Optional, for comparison | MIT |
 
 Both models are trained on the WIDER FACE dataset, which has its own terms of use. Check compliance before using this commercially or publishing data.

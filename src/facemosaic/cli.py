@@ -83,6 +83,15 @@ def cmd_check(a) -> int:
         line("!!", f"model missing: {model} -- run: facemosaic download-models")
         ok = False
 
+    pc = cfg["tracking"].get("person_check") or {}
+    if pc.get("enabled"):
+        pm = resolve_path(pc["model"])
+        if pm.exists():
+            line("OK", f"person check enabled, model: {pm}")
+        else:
+            line("!!", f"person check enabled but model missing: {pm} -- run: facemosaic download-models --all")
+            ok = False
+
     if model.exists() and dcfg["name"] == "scrfd":
         from .detectors import build_detector
 
@@ -160,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("download-models", help="download models into models/ (SHA256-verified)")
     d.add_argument("--dir", type=Path, default=REPO_ROOT / "models", help="download directory (default: <repo>/models)")
-    d.add_argument("--all", action="store_true", help="also download YuNet (only used by `compare`)")
+    d.add_argument("--all", action="store_true", help="also download YOLOX-s (for tracking.person_check) and YuNet (only used by `compare`)")
     d.add_argument("--force", action="store_true", help="download again even if present")
     d.set_defaults(func=cmd_download)
 
